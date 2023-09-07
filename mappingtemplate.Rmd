@@ -1,0 +1,611 @@
+```{r Libraries}
+
+if(!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+pacman::p_load(here, folders, readr, dplyr, tidyr, stringr, purrr, lubridate, knitr, snakecase, ggplot2, usmap, ggthemes, cowplot, cdlTools, magrittr, rgdal, spdep, usethis, rlang, tidygeocoder, mapview, ggmap, sf, tigris, ggrepel, maptools, MetBrewer, maps, tidyverse, wesanderson, RColorBrewer, cowplot, urbnmapr, tmap, ggdraw, kableExtra, viridis, patchwork, cdlTools) #installs (if it is not already) and loads packages
+
+
+#Working Directory: a file path on your computer that sets the default location of any files you read into R, or save out of R. 
+getwd() #tells you what your wd is
+setwd() #allows you to set the working directory 
+
+# Bread and Butter of Data Manipulation
+#   dplyr
+#   readr
+#   tidyr
+#   lubridate 
+#   stringr 
+
+# Data Visualization-------------------------------------------
+#   ggplot2: main package used for data visualization
+#   patchwork: plot theme and annotations for ggplot2 
+
+# Spatial and Mapping Packages----------------------------------
+#   sf: main package that allows us to work with vector data (points, lines, and polygons) the github cheat sheet shows the full ability of sf from something as simple as creating sf objects using the lat/long in your df to preforming algebraic operations on your spatial data such as creating buffer polygons (https://github.com/rstudio/cheatsheets/blob/main/sf.pdf) 
+
+#   tigris: Download TIGER/Line shapefiles from the United States Census Bureau (loads into R as 'sf' objects) (default year 2021 ATM) (NAD 1983 Default)
+        #functions for simple feature (sf) objects such as states, counties, tracts, urban areas, tribal areas, roads, and more
+
+#   maps: outlines if continents, countries, states, and counties
+
+#   ggmap: helps visualize spatial data and use online sources like google. Includes function to allow geocoding from google API (gecode() and register_google())
+
+#   usmap: us maps including AK and HI (automatically placed in the bottom left corner). Regions included as well such as "new england", south Atlantic, south, west, west south. Includes FIPS codes  
+
+
+# Color Packages: RColorBrewer, viridis, MetBrewer, wesanderson
+    #when making maps color is an important tool in helping the audience comprehend what is going on. Also always consider colorblind audience members
+
+```
+
+
+
+```{r Loading in Ready Shapefiles}
+
+# GEOMETRY
+# What makes spatial information actually "spatial" is the geometry column. This is the column that tells R where in the world (literally) your information or data is. Spatial information comes in two formats (vector or raster)
+
+# Vector: points (ex u.s. hospitals), lines (roads), polygons (counties, forest boundaries) (attributes are applicable for the entire polygon)
+# Raster: grid of pixels (each grid has it own attribute value)
+
+# Thankfully there are already many spatial datasets already organized and ready to be pulled directly into R. The Census tiger lines files are a incredibly helpful tool in mapping and can easily be loaded in after installing the tigris package
+
+# Loading shapefiles from the tigris package 
+usa_states <- states() #USA state boundaries
+usa_counties <- counties(state=NULL) #USA county boundaries. state = NULL will include the whole US but state = can be used to select specific states to include
+usa_block_groups <- block_groups(state = NULL, county = NULL, year = NULL) 
+
+# Additional tigris features 
+usa_roads <- roads(state, county, year = NULL) 
+usa_schools <- school_districts(state = NULL)
+
+# For a full list of possible functions of the trigris package --> https://cran.r-project.org/web/packages/tigris/tigris.pdf 
+# See above in libraries chunk for other spatial/mapping packages that are helpful 
+
+```
+
+
+
+```{r Dataset Manipulation and Joining}
+
+# Now that we have boundaries we want to add in our own data that contains the variables we're interested in mapping 
+
+# Loading in my data set using read_csv... 
+preterm_birth <- read_csv("~/casey-cohort/projects/Mapping Template/yr_cnty_ptbr.csv")
+
+# Births occurring in the US to US residents between 20 and 45 weeks gestation (inclusive) containing: 
+# year
+# hrstate- State mother’s resident 
+# hrcnty- County mother’s resident
+# births- Num. of births
+# preterm- Num. of preterm births
+# ptbr- Preterm birth rate (per 100 live births)
+
+
+# Now I have state and/or county level shapefiles as df (usa and/or usa_counties) with geometry and my own df with columns that have location based information (state and county) but no geometry. Remember even though we have locations the lack of geometry means that it won't be mapped. R does not understand spatial information without geometry
+
+# To map the data at the county level we must join our data with the spatially referenced df (ie usa_counties). To do this we can join the two df based on based on a common column (i.e. country, state, county, FIPS code/GEOID) to link polygon information/spatial information to our data. Using FIPS codes/GEOID as the common column is the easiest for data on a county level. 
+
+# FIPS: States are given FIPS codes based on alphabetical order (AL = 1, AK = 2, AZ = 3, etc) Counties are 3 digit codes that are reused for states so to get a unique county FIPS code the state FIPS codes are added to the front of each county (01001, 02001, 04001, etc), where the first two digits refer to the state and the last three digits refer specifically to the county. (Census)
+
+# state-level    place
+#     FIPS code     name
+#    -----------   -------
+#        01        ALABAMA
+#        02        ALASKA
+#        04        ARIZONA
+#        05        ARKANSAS
+#        06        CALIFORNIA
+#        08        COLORADO
+#        09        CONNECTICUT
+#        10        DELAWARE
+#        11        DISTRICT OF COLUMBIA
+#        12        FLORIDA
+#        13        GEORGIA
+#        15        HAWAII
+#        16        IDAHO
+#        17        ILLINOIS
+#        18        INDIANA
+#        19        IOWA
+#        20        KANSAS
+#        21        KENTUCKY
+#        22        LOUISIANA
+#        23        MAINE
+#        24        MARYLAND
+#        25        MASSACHUSETTS
+#        26        MICHIGAN
+#        27        MINNESOTA
+#        28        MISSISSIPPI
+#        29        MISSOURI
+#        30        MONTANA
+#        31        NEBRASKA
+#        32        NEVADA
+#        33        NEW HAMPSHIRE
+#        34        NEW JERSEY
+#        35        NEW MEXICO
+#        36        NEW YORK
+#        37        NORTH CAROLINA
+#        38        NORTH DAKOTA
+#        39        OHIO
+#        40        OKLAHOMA
+#        41        OREGON
+#        42        PENNSYLVANIA
+#        44        RHODE ISLAND
+#        45        SOUTH CAROLINA
+#        46        SOUTH DAKOTA
+#        47        TENNESSEE
+#        48        TEXAS
+#        49        UTAH
+#        50        VERMONT
+#        51        VIRGINIA
+#        53        WASHINGTON
+#        54        WEST VIRGINIA
+#        55        WISCONSIN
+#        56        WYOMING
+#        60        SAMOA
+#        66        GUAM
+#        69        COMMONWEALTH OF THE NORTHERN MARIANA ISLANDS
+#        72        PUERTO RICO
+#        78        VIRGIN ISLANDS
+
+# My "hrcnty" column identifies the FIPS code, but counties w/FIPS <100 are missing the leading zeros and the state identifiers are not included, only the state abbreviations. This means I need to do some data manipulation before I can join with the tigris county file 
+
+# I created a new column (named statefips) and converted the abbreviations to FIPS codes using the package cdlTools and the function fips 
+preterm_birth$statefips <- fips(preterm_birth$hrstate, to = "FIPS")
+
+# Adding padding for statefips 
+preterm_birth$statefips <- sprintf("%02d", preterm_birth$statefips)
+
+# Adding padding for county fips (hrcnty)
+preterm_birth$hrcnty <- sprintf("%03d", preterm_birth$hrcnty)
+
+# Creating a GEOID col that will be identical to the usa df GEOID col format by combining state and county fips codes. paste() combines the chr from one col with the other in the order that you listed the cols 
+preterm_birth$GEOID <- paste0(preterm_birth$statefips, preterm_birth$hrcnty)
+
+
+# We can now complete a join to merge our data and the county level boundaries based on GEOID. It is important to understand what type of join you will use. left_join or right_join. Specifying left or right determines what table is going to keep its unmatched values (if num of obs do not match between dfs), the left or right one. This is important because when mapping we usually want to retain all county information even if there is no data for that county, this way we will still see the outlines for counties that do not have data. If you left_join the counties to the data ie (left_join(df, usa_counties, by ="GEOID)) you will only add spatial information to your data set. An easy way to check what you've done is to look at the number of observations for dfs in your global environment pane. If you have 1130 obs in your df and 3234 obs in the counties df (usa_couties) but after you merge you only have 1130 obs, you know you lost the counties that do not have data. 
+
+# My preterm birth df has yearly data from 1995-2019, but the counties from tiger are only for 2021, meaning one entry per county (3234 counties in the US as of 2021). I am expanding the usa counties to duplicate the county information for every year I have preterm birth data for (1995-2019) in order to easily join and accommodate the multiple years in the preterm birth data
+years <- data.frame(year = 1995:2019)
+
+expanded_counties <- years %>%
+  expand(year, GEOID = usa_counties$GEOID) #I specifically care about GEOID because that is my unique identifier and crucial to be able to join with the preterm birth data. 
+
+expanded_counties <- expanded_counties %>%
+  left_join(usa_counties, by = "GEOID") #this brings in spatial information (geometry) based on GEOID from the original counties df 
+
+#Join preterm birth to expanded county data 
+spatial_preterm_data <- left_join(expanded_counties, preterm_birth, by = c("GEOID", "year")) #since I have expanded to accommodate all years I need to nake sure R joins not only by GEOID but also by year so that no information is duplicated
+
+```
+
+
+
+```{r Loading in Other Sources of Data}
+
+
+# If you find you need/have other forms of spatial information that is not pre organized in a package like tigris (for example wildfire perimeters or land use information) you can also load these into R similarly to how you would any other csv or file.
+
+# Read in shapefiles or other spatial data
+# In order to work with shapefiles you need all 4 files types (shp, shx, dbf, prj) in the same location (same working directory)
+df <- st_read("filename.shp")
+# By nature of being an .shp the data frame should have geometry and be able to be mapped. 
+
+
+
+
+
+# If you are working with coordinates (lat/long), you can easily turn them into a geometry col by using st_as_sf.
+# Creating sf objects/features (points, lines or polygons (plp) from "foreign" objects from your data using lat/long coordinates.
+df <- st_as_sf(df, 
+               coords = c("lon", "lat"), #it is creating spatial information (coordinates) based the lat lon col
+               crs = 4326 #WGS84
+)
+
+```
+
+
+
+```{r CRS: Coordinate Reference System}
+
+# Geographic (GCS) versus Projected (PCS)
+#   GCS defines WHERE the data is located on the earth’s surface. Uses angular units (degrees, lat/long)
+#   PCS tells the data HOW to draw on a flat surface, like on a paper map or a computer screen since IRL our beautiful earth is 3D. PCS also contains a GSC. You are basically     setting the location with the GCS then telling the computer how to warp or turn hat 3D datum into a 2D image. Uses linear units (cartesian coordinates x,y, meters)
+    
+# This means it is important to consider where and the extent of your data. Some CRS could be  better suited than others for your project. Your data can be stored with a GCS without a PCS but when it comes time to map if you do not have one assigned most systems will automatically displayed the data in a "Plate Caree) 
+
+# Examples of Common GCS
+#   WGS84 (EPSG:4326)
+#   NAD83 (EPSG:4269) 
+
+# Examples of Common PCS 
+#   UTM 
+#   Albers Equal Area (Conic): preserved area, distorts shapes
+#   Equal Area Cylindrical: preserved area, distorts shapes
+#   Lambert Conformal (Conic): preserves shape at expensive of the area 
+#   Mercator (Cylindrical) (Conformal): correct shape, exaggerates areas at high latitudes, designed for navigation as angles at intersections are true
+
+# Use st_crs() to check the projection 
+# Use st_transform(x, crs...) to change the CRS 
+
+# Changing both my projections to the same projection using st_transform: NAD 1983 Albers contiguous USA
+spatial_preterm_data <- st_transform(spatial_preterm_data, crs = "ESRI:102003")
+
+# sources: https://www.esri.com/arcgis-blog/products/arcgis-pro/mapping/gcs_vs_pcs/, Dr. Kim Driver
+```
+
+
+
+```{r Creating Ranks or Categorical Variables}
+
+# While it is common to map continuous data such as birth rate at a county level, often times we want to create categories or levels of the variable of interest to make map interpretation easier or communicate a specific observation. 
+
+# Assigning natural ranks and breaks 
+df$rank <- factor(rank(df$colofinterest)) #here we are creating a new column (rank) and filling it in 
+
+# Controlling the breaks/groups ourselves. Here as an example we create a new col (using mutate) called ptbrates based on the ptbr col (using case_when to read the ptbr col)
+spatial_preterm_data <- spatial_preterm_data %>% mutate(ptbrates = case_when(
+                                            ptbr<0.1 ~ 0,
+                                            ptbr>0.1 & ptbr<.5 ~ 1,
+                                            ptbr>0.5 ~ 2))
+ 
+# This renames the levels to match our designated labels. So within "ptbrates" col, we changed the cell contents to our labels based on the levels assigned above 
+spatial_preterm_data$ptbrates <- factor(spatial_preterm_data$ptbrates, levels=c(0,1,2), labels=c("Low", "Medium", "High")) 
+
+# We will use the new category column (ptbrates) as the fill (within aes) when mapping so that the map displays the information from thee ptbrates column 
+  
+```
+
+
+
+```{r Mapping Data}
+
+# Basic Code
+# Easily check what the feature class look like in simplest form and identify is something isn’t working or being read correctly
+ggplot() +
+    geom_sf(data = usa_counties) #we use the function geom_sf because we want to map simple features (SF) which have spatial information (ie geometry) This mean R will map whatever type of feature class you have in the geometry col (points, lines, or polygons)
+
+
+# Layer additional maps or information (such as points) on top of one another map by adding another geom_sf function. ORDER MATTERS, if you cannot see a layer check to make sure it is not hidden beneath another
+ggplot() +
+    geom_sf(data = usa_counties) + 
+    geom_sf(data = pts_df, color = "#FF69B4", size = 2) #this for example could be another dataset (df_points) with point geometry to map on top of the other data frame with its own feature class of polygons 
+
+
+
+
+# Filtering Data
+
+#   df %>% filter within the geom_sf function 
+
+# Filter OUT
+ggplot() +
+    geom_sf(data = df %>% filter(!states %in% c("ohio", "new jersey"))) #"states" is the col name and %in% looks for instances of "ohio" and "new jersey" within the states col to exclude those entries from the map. You have to replace "ohio" and "new jersey" with whatever format your column is in, whether that be FIPS codes or state abbreviations. 
+
+# The ! mark designates to NOT include specific values within the col. 
+
+
+# If you want to ONLY INCLUDE certain states or counties you do the same thing but do not include the !
+ggplot() +
+    geom_sf(data = df %>% filter(states %in% c("maryland", "michigan")))
+
+# You can filter by whatever col and cell content you wish by just changing what col the filter is reading from. The %>% is used so that R knows to look for the column you list specifically within the DF
+
+
+# You can also filter by multiple columns. For example since I have 25 years of data and if I only want to see one year so I will filter by year to 2000 but I also only want exclude non CONUS data so by including another pipe and filter argument I can do both.
+ggplot() +
+    geom_sf(data = spatial_preterm_data %>% filter(year %in% c("2000")) %>%  filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")))
+
+```
+
+
+
+```{r Symbology}
+
+#   Notes and Good Practice of Map Symbols 
+#       Measurement type → consider symbol and color choices
+#           Nominal
+#               Use unique symbols, hues, or patterns 
+#           Categorical
+#               Hue, shape, line type, or pattern
+#           Ordinal
+#               Graduation in values or symbol size 
+#           Ratio/Interval 
+#               Gradation in symbol sizes
+#               Graduation in color
+#                   Vary saturation and/or value
+
+# COLORS USE HEX CODES OR SPECIFIC NAMES: http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf
+
+# POINTS
+#   color =
+#   fill =
+#   shape =
+#       0, square 
+#       1, circle
+#       2, triangle point up
+#       3, plus
+#       4, cross
+#       5, diamond
+#       6, triangle point down
+#       7, square cross
+#       8, star
+#       9, diamond plus
+#       10, circle plus
+#       11, triangles up and down
+#       12, square plus
+#       13, circle cross
+#       14, square and triangle down
+#       15, filled square
+#       16, filled circle
+#       17, filled triangle point-up
+#       18, filled diamond
+#       19, solid circle
+#       20, bullet (smaller circle)
+#       21, filled circle blue
+#       22, filled square blue
+#       23, filled diamond blue
+#       24, filled triangle point-up blue
+#       25, filled triangle point down blue
+#   size =
+
+    
+# LINES
+#   line type =
+#       "blank", "solid", "dashed", "dotted", "dotdash", "longdash", "twodash"
+#   size =
+#   color =
+    
+
+# POLYGONS
+#   Within aes 
+#       fill = (inside of the feature) this can be a color or can be a variable (numeric or categorical) to color based on 
+#       color = (outline of the feature)
+#       linewidth = 
+
+
+# LABELS
+    + geom_text(data = df, ) #check_overlap = TRUE avoids overlaps
+    + geom_label(data = df, aes(fill = factor(), colour = "white", fontface = "bold")) #draws a rectangle around the label
+    + geom_label_repel(data = df , aes(x = `long`, y = `lat`, label = ``, group = NULL)) #makes sure labels do not overlap and hide one another
+#   https://ggplot2.tidyverse.org/reference/geom_text.html 
+    
+    
+# Theme (title, axis, legend) theme for mapping works just like for traditional graphs allowing for customization of the elements of your map. In mapping it is normally most useful for changing the legend or the title. https://ggplot2.tidyverse.org/reference/theme.html
+
+theme_map() #simplest / best theme for maps 
+
+```
+
+
+
+```{r RColorBrewer Package}
+
+# There are 3 types of palettes :
+# 
+# Sequential palettes are suited to ORDERED DATA (categorical or numeric) that progress from low to high. Lightness steps dominate the look of these schemes, with light colors for low data values to dark colors for high data values.
+#
+# Diverging palettes put equal emphasis on mid-range critical values and extremes at both ends of the data range. The critical class or break in the middle of the legend is emphasized with light colors and low and high extremes are emphasized with dark colors that have contrasting hues.
+# 
+# Qualitative palettes do not imply magnitude differences between legend classes, and hues are used to create the primary visual differences between classes. Qualitative schemes are best suited to representing nominal or categorical data.
+
+
+# Sequential palettes
+# Blues
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette= "Blues") +
+    theme_map()  
+
+# Blue Green
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette= "BuGn") +
+    theme_map()  
+
+# Red Pink
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette= "RdPu") +
+    theme_map()  
+
+
+
+# Diverging palettes
+# Spectral
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette= "Spectral") +
+    theme_map()  
+
+# Red, Yellow, Blue
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette = "RdYlBu") + 
+    theme_map() 
+
+# Yellow, Green, Blue
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette = "YlGnBu") + 
+    theme_map() 
+
+
+
+# Qualitative palettes
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette = "Accent") + 
+    theme_map()  
+
+
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_brewer("Legend Name", palette = "Pastel2") + 
+    theme_map()  
+
+
+# All of these templates filter out non CONUS based on FIPS code. Remove, change, or edit the filter according to your needs 
+# For a full list of palettes you can either use display.brewer.all() look at the source websites  
+
+# Sources: https://r-graph-gallery.com/38-rcolorbrewers-palettes.html 
+#          https://jmsallan.netlify.app/blog/the-brewer-palettes/ 
+#          https://statisticsglobe.com/scale-colour-fill-brewer-rcolorbrewer-package-r
+
+```
+
+
+
+```{r Viridis Package}
+
+# Viridis can be used for continuous or discrete data. Also a great colorblind friendly palette 
+
+# Viridis Palette
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_viridis("Legend Name", option="viridis", discrete= TRUE) + 
+    theme_map()  
+
+# Magma Palette 
+df %>%  ggplot() + 
+    geom_sf(data = df %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = category_col)) +
+    scale_fill_viridis("Legend Name", option="magma", discrete= TRUE) + #delete discrete = TRUE if continuous (defaults)
+    theme_map()  
+
+#https://jmsallan.netlify.app/blog/the-viridis-palettes/ 
+
+```
+
+
+
+```{r Manual Color Selection}
+
+#You can create your own color palettes if none of the premade one fit what you’re looking for - especially helpful if you want to apply the same theme to multiple maps
+gobluepalette <- c("#FFCB05", "#00274C","#2F65A7")
+
+#Then you can use scale_fill_manual and assign the values as you custom palette 
+scale_fill_manual(values = gobluepalette)
+
+#Additionally you can list each individual color 
+scale_fill_manual(values = c("#FF69B4", "#228B22"), na.value="white") # explain how labeled on the legend - important to show missing values
+
+```
+
+
+
+```{r Patchwork}
+
+# Patchwork is a package that allows to combine "patch" together various graphs into one
+# It uses simple notation like + and / to organize where each graph or visual goes 
+
+# If I have three separate graphs of CONUS, Alaska, Hawaii, I can combine them using patchwork
+# Make sure to use the actual names of the graphs (assigned using <-)
+
+#Basics
+CONUS_map + HI_map + AK_map #This would put all three in a row
+CONUS_map / (HI_map | AK_map) #This would make the CONUS map on top and the HI and AK maps next to each other underneath the CONUS map 
+
+#Adding Annotations
+(CONUS_nicus96_23 | AK_HI_96_23_plot) +
+    plot_annotation(title = 'Change in Number of NICUs from 1996 to 2023', theme = theme(plot.title = element_text(hjust = .5))) #hjust centers thr title in the middle
+
+
+# https://patchwork.data-imaginist.com/ the "Learn more" section of the article has links to all the other help pages about adding annotations and moving around plots in more specific ways 
+
+```
+
+
+
+```{r Facet Wrap}
+
+#Facet is a useful to show multiple plots based on categorical variables. It allows you to visualize multiple subsets of the data side by side and allow for easy comparison.
+
+facet_wrap(
+  facets,
+  nrow = NULL,
+  ncol = NULL,
+  scales = "fixed",
+  shrink = TRUE,
+  labeller = "label_value",
+  as.table = TRUE,
+  switch = deprecated(),
+  drop = TRUE,
+  dir = "h",
+  strip.position = "top"
+)
+
+# https://ggplot2.tidyverse.org/reference/facet_wrap.html 
+
+# For example, since I have a year variable to my dataset I can facet_wrap using year to show preterm birth rates for the past 25 years side by side and compare them to one another 
+faceted_maps <- ggplot()+
+geom_sf(data = spatial_preterm_data %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = births)) +
+  facet_wrap(~ year)
+
+
+# Another common category to map by is region. In order to do this you will need to add a region column to your df based on the state column. Here is the common breakdown. See the list of FIPS codes above if necessary based on how your states column is formatted
+
+# New England: Connecticut, Maine, Massachusetts, New Hampshire, Rhode Island, Vermont
+# Middle Atlantic: Delaware, Maryland, New Jersey, New York, Pennsylvania, Washington D.C. 
+# South: Alabama, Arkansas, Florida, Georgia, Kentucky, Louisiana, Mississippi, Missouri, North Carolina, South Carolina, Tennessee, Virginia, West Virginia
+# Midwest: Illinois, Indiana, Iowa, Kansas, Michigan, Minnesota, Nebraska, North Dakota, Ohio, South Dakota, Wisconsin
+# Southwest: Arizona, New Mexico, Oklahoma, Texas
+# West: Alaska, California, Colorado, Hawaii, Idaho, Montana, Nevada, Oregon, Utah, Washington, Wyoming
+facet_wrap(~ region) #(or whatever you name the column)
+
+```
+
+
+
+```{r Saving}
+
+# The easiest way to save graphs and plots is using ggsave. You can create the fill name, select what plot to save, then play around with the width and height to find your best fit
+
+
+# The simplest form is just a filename and plot (it will automatically select the last plot if you do not specify)
+ggsave("finalptbr2000", dpi=300, height=10, width=18, units="in")
+
+
+# There are a variety arguments you can change in addition to the basics if you need to be more specific with how the map will look
+ggsave(
+  filename,
+  plot = last_plot(),
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = NA,
+  height = NA,
+  units = c("in", "cm", "mm", "px"),
+  dpi = 300, #DPI: dots per inch. Changing this impacts the resolution of the map 
+  limitsize = TRUE,
+  bg = NULL,
+  ...
+)
+
+# Save the facet version (make sure yu named and saved the facet version) and replace finalptbr2000 with your assinged name such as faceted_maps
+
+# https://search.r-project.org/CRAN/refmans/ggplot2/html/ggsave.html 
+```
+
+
+```{r Full Example}
+
+pretermbirths2000 <- spatial_preterm_data %>%  ggplot() + 
+  geom_sf(data = spatial_preterm_data %>% filter(!STATEFP %in% c("02", "15", "72", "78", "69", "60", "66")), aes(fill = ptbrates)) +
+  scale_fill_brewer("Preterm Birth Rates", palette = "YlGnBu") +
+  theme(axis.text.x= element_blank(),
+        axis.text.y= element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks = element_blank(),
+        rect = element_blank(),
+        legend.position = "left", 
+        legend.key.size = unit(.3, 'cm'), 
+        plot.title = element_text(size = 12))+
+   labs(title = "Preterm Birth Rates 2000")
+CONUS_nicus96
+
+ggsave("pretermbirths2000.png", dpi=300, height=10, width=18, units="in")
+
+
+```
+
+
+
